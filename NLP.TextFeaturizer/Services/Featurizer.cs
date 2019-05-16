@@ -1,5 +1,6 @@
 ﻿using Microsoft.ML;
 using Microsoft.ML.Data;
+using Microsoft.ML.Trainers;
 using Microsoft.ML.Transforms.Text;
 using NLP.TextFeaturizer.Models;
 using System;
@@ -34,6 +35,8 @@ namespace NLP.TextFeaturizer.Services
 
             var data = reader.Load(dataPath);
 
+            var split = mlContext.Data.TrainTestSplit(data, testFraction: 0.1, seed: 1);
+
 
             var queries = data.GetColumn<string>("QueryHint");
 
@@ -61,8 +64,7 @@ namespace NLP.TextFeaturizer.Services
                 // word embeddings
                 .Append(mlContext.Transforms.Text.ApplyWordEmbedding(outputColumnName: "Embeddings", inputColumnName: "TokenizedQuery",
                         modelKind: WordEmbeddingEstimator.PretrainedModelKind.GloVe50D))
-
-                // TODO: change algo
+                        
 
                 .Append(mlContext.MulticlassClassification.Trainers.NaiveBayes(labelColumnName: "Label", featureColumnName: "Embeddings"))
 
@@ -71,17 +73,38 @@ namespace NLP.TextFeaturizer.Services
                 .Append(mlContext.Transforms.Conversion.MapKeyToValue(outputColumnName: "PredictedLabel"))
             ;
 
-            var model = pipeline.Fit(data);
-            var transformedData = model.Transform(data);
+            var model = pipeline.Fit(split.TrainSet);
 
-            var features = transformedData.GetColumn<float[]>("TextFeatures").Take(20).ToArray();
-            //var normalized = transformedData.GetColumn<object[]>(mlContext, "NormalizedQuery").Take(10).ToArray();
-            var tokenizedQueries = transformedData.GetColumn<string[]>("TokenizedQuery").Take(20).ToArray();
-            //var unigrams = transformedData.GetColumn<float[]>(mlContext, "BagOfWords").Take(10).ToArray();
-            //var ngrams = transformedData.GetColumn<float[]>(mlContext, "BagOfTrigrams").Take(10).ToArray();
-            var embeddings = transformedData.GetColumn<float[]>("Embeddings").Take(20).ToArray();
+            
+            // looking at the pipeline data
+
+            //var transformedData = model.Transform(data);
+
+            //var features = transformedData.GetColumn<float[]>("TextFeatures").Take(20).ToArray();
+            ////var normalized = transformedData.GetColumn<object[]>(mlContext, "NormalizedQuery").Take(10).ToArray();
+            //var tokenizedQueries = transformedData.GetColumn<string[]>("TokenizedQuery").Take(20).ToArray();
+            ////var unigrams = transformedData.GetColumn<float[]>(mlContext, "BagOfWords").Take(10).ToArray();
+            ////var ngrams = transformedData.GetColumn<float[]>(mlContext, "BagOfTrigrams").Take(10).ToArray();
+            //var embeddings = transformedData.GetColumn<float[]>("Embeddings").Take(20).ToArray();
 
 
+            var metrics = mlContext.MulticlassClassification.Evaluate(model.Transform(split.TestSet));
+
+            Console.WriteLine("\nMetrics");
+            Console.WriteLine("MicroAccuracy: {0}\nMacroAccuracy: {1}", metrics.MicroAccuracy, metrics.MacroAccuracy);
+            Console.WriteLine("LogLoss: {0}", metrics.LogLoss);
+            
+
+            var crossValidate = mlContext.MulticlassClassification.CrossValidate(data, pipeline, numberOfFolds: 5);
+
+            var cvMicro = crossValidate.Select(x => x.Metrics.MicroAccuracy);
+            var cvMacro = crossValidate.Select(x => x.Metrics.MacroAccuracy);
+            Console.WriteLine("\nCross Validate");
+            Console.WriteLine("MicroAccuracy: {0}\nMacroAccuracy: {1}", cvMicro.Average(), cvMacro.Average());
+
+            Console.WriteLine("\n");
+
+            
             return model;
         }
 
@@ -116,7 +139,6 @@ namespace NLP.TextFeaturizer.Services
 
             }
         }
-
 
     }
 }
